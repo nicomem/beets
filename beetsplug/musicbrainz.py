@@ -316,6 +316,34 @@ class MbInterface:
 
         return full_query
 
+    @staticmethod
+    def _remove_none_values(data):
+        """Iterate recursively over a Python object to remove all None values in
+        dicts
+        """
+        if isinstance(data, dict):
+            return {
+                key: MbInterface._remove_none_values(value)
+                for key, value in data.items()
+                if value is not None
+            }
+        elif isinstance(data, list):
+            return [MbInterface._remove_none_values(item) for item in data]
+        else:
+            return data
+
+    @staticmethod
+    def _parse_and_clean_json(data: bytes) -> JSONDict:
+        """Parse the JSON data and remove all None values in dicts.
+        This is needed as the MusicBrainz JSON data contains None values instead of
+        simply not setting them in dictionaries.
+        This is also different from the their XML data which only contains filled
+        values.
+
+        :param data: JSON data as bytes
+        """
+        return MbInterface._remove_none_values(json.loads(data))
+
     def browse_recordings(
         self,
         lookup_entity_type: Literal["artist", "collection", "release", "work"],
@@ -334,7 +362,7 @@ class MbInterface:
         :param offset: Offset used for paging through more than one page of results
         :return: The JSON-decoded response as an object
         """
-        return json.loads(
+        return MbInterface._parse_and_clean_json(
             self._browse(
                 self,
                 lookup_entity_type,
@@ -358,7 +386,7 @@ class MbInterface:
             about the release
         :return: The JSON-decoded response as an object
         """
-        return json.loads(
+        return MbInterface._parse_and_clean_json(
             self._lookup(
                 self,
                 "release",
@@ -379,7 +407,7 @@ class MbInterface:
             about the recording
         :return: The JSON-decoded response as an object
         """
-        return json.loads(
+        return MbInterface._parse_and_clean_json(
             self._lookup(
                 self,
                 "recording",
@@ -401,7 +429,7 @@ class MbInterface:
         :param fields: Dict of fields composing the search query
         :return: The JSON-decoded response as an object
         """
-        return json.loads(
+        return MbInterface._parse_and_clean_json(
             self._search(
                 self,
                 "release",
@@ -424,7 +452,7 @@ class MbInterface:
         :param fields: Dict of fields composing the search query
         :return: The JSON-decoded response as an object
         """
-        return json.loads(
+        return MbInterface._parse_and_clean_json(
             self._search(
                 self,
                 "recording",
