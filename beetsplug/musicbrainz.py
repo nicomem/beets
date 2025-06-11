@@ -175,6 +175,8 @@ class MbResponseError(mbzerror.MbzWebServiceError):
 
 
 class MbInterface:
+    """An interface for sending requests using MusicBrainz API"""
+
     BEETS_USERAGENT = "beets/{} (https://beets.io/)".format(beets.__version__)
 
     def __init__(self, useragent=BEETS_USERAGENT):
@@ -183,41 +185,103 @@ class MbInterface:
         self.useragent = useragent
         pass
 
-    def set_hostname(self, hostname, https):
+    def set_hostname(self, hostname: str, https: bool):
         self.hostname = hostname
         self.https = https
 
     @_RateLim
     def _lookup(
-        self, entity, mbid, includes, limit=None, offset=None, params={}
-    ):
+        self,
+        entity_type: str,
+        mbid: str,
+        includes: list[str],
+    ) -> bytes:
+        """Send a lookup request to the configured MusicBrainz API to get information
+        on a single entity
+
+        :param entity_type: The type of entity to look up
+        :param mbid: The MusicBrainz ID of the entity to look up
+        :param includes: List of parameters to request more information to be included
+            about the entity
+        :return: The response as bytes
+        """
         return self._send(
-            mbzr.MbzRequestLookup(self.useragent, entity, mbid, includes),
-            limit=limit,
-            offset=offset,
+            mbzr.MbzRequestLookup(self.useragent, entity_type, mbid, includes),
         )
 
     @_RateLim
     def _browse(
-        self, entity, bw_entity, mbid, includes=[], limit=None, offset=None
-    ):
+        self,
+        lookup_entity_type: str,
+        mbid: str,
+        linked_entities_type: str,
+        includes: list[str] = [],
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> bytes:
+        """Send a browse request to the configured MusicBrainz API to get entities
+        linked to looked up one
+
+        :param lookup_entity_type: The type of entity to look up
+        :param mbid: The MusicBrainz ID of the entity to look up
+        :param linked_entities_type: The type of linked entities to find
+        :param includes: List of parameters to request more information to be included
+            about the entity
+        :param limit: The number of entities that should be returned
+        :param offset: Offset used for paging through more than one page of results
+        :return: The response as bytes
+        """
         return self._send(
             mbzr.MbzRequestBrowse(
-                self.useragent, entity, bw_entity, mbid, includes
+                self.useragent,
+                linked_entities_type,
+                lookup_entity_type,
+                mbid,
+                includes,
             ),
             limit=limit,
             offset=offset,
         )
 
     @_RateLim
-    def _search(self, entity, query, limit=None, offset=None, **fields):
+    def _search(
+        self,
+        entity_type: str,
+        query: str,
+        limit: int | None = None,
+        offset: int | None = None,
+        **fields,
+    ) -> bytes:
+        """Send a search request to the configured MusicBrainz API to search entities
+        based on a query
+
+        :param entity_type: The type of entity to look up
+        :param query: The query in the Lucene Search syntax
+        :param limit: The number of entities that should be returned
+        :param offset: Offset used for paging through more than one page of results
+        :return: The response as bytes
+        """
         return self._send(
-            mbzr.MbzRequestSearch(self.useragent, entity, query),
+            mbzr.MbzRequestSearch(self.useragent, entity_type, query),
             limit=limit,
             offset=offset,
         )
 
-    def _send(self, mbr, limit=None, offset=None):
+    def _send(
+        self,
+        mbr: mbzr.MbzRequestLookup
+        | mbzr.MbzRequestSearch
+        | mbzr.MbzRequestBrowse,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> bytes:
+        """Send the request
+
+        :param mbr: The request object
+        :param limit: The number of entities that should be returned
+        :param offset: Offset used for paging through more than one page of results
+        :return: The response as bytes
+        """
         if self.hostname:
             scheme = "https" if self.https else "http"
             mbr.set_url(f"{scheme}://{self.hostname}/ws/2")
@@ -228,35 +292,23 @@ class MbInterface:
             opts["offset"] = offset
         return mbr.send(opts=opts)
 
-    def _make_params(self, release_status=[], release_type=[]):
-        params = {}
-        if len(release_status):
-            params["status"] = "|".join(release_status)
-        if len(release_type):
-            params["type"] = "|".join(release_type)
-        return params
+    def _make_query(self, fields: dict[str, str] = {}) -> str:
+        """Make a Lucene Query string from a dict of fields
 
-    def _make_query(self, query="", fields={}):
-        """`query` is a lucene query string when no fields are set,
-        but is escaped when any fields are given. `fields` is a dictionary
-        of key/value query parameters.
+        :param fields: Dict of field keys and values used to build the query.
+            Values will be properly escaped.
+        :return: The built Lucene Query string
         """
         # Encode the query terms as a Lucene query string.
         lucene_special = r'([+\-&|!(){}\[\]\^"~*?:\\\/])'
         query_parts = []
 
-        if query:
-            if fields:
-                clean_query = re.sub(lucene_special, r"\\\1", query)
-                query_parts.append(clean_query.lower())
-            else:
-                query_parts.append(query)
         for key, value in fields.items():
             # Escape Lucene's special characters.
             value = re.sub(lucene_special, r"\\\1", value)
             if value:
                 value = value.lower()  # avoid AND / OR
-                query_parts.append("%s:(%s)" % (key, value))
+                query_parts.append(f"{key}:({value})")
         full_query = " ".join(query_parts).strip()
 
         if not full_query:
@@ -265,63 +317,118 @@ class MbInterface:
         return full_query
 
     def browse_recordings(
-        self, bw_entity, mbid, includes=[], limit=None, offset=None
-    ):
-        """Get all recordings linked to an artist or a release.
-        You need to give one MusicBrainz ID."""
-        return self._browse(
-            self,
-            "recording",
-            bw_entity,
-            mbid,
-            includes,
-            limit=limit,
-            offset=offset,
-        )
+        self,
+        lookup_entity_type: Literal["artist", "collection", "release", "work"],
+        mbid: str,
+        includes: list[str] = [],
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> JSONDict:
+        """Browse recordings linked to an entity
 
-    def get_release_by_id(
-        self, mbid, includes=[], release_status=[], release_type=[]
-    ):
+        :param lookup_entity_type: The type of entity whose recordings are to be browsed
+        :param mbid: The MusicBrainz ID of the entity
+        :param includes: List of parameters to request more information to be included
+            about the recordings
+        :param limit: The number of recordings that should be returned
+        :param offset: Offset used for paging through more than one page of results
+        :return: The JSON-decoded response as an object
+        """
         return json.loads(
-            self._lookup(
+            self._browse(
                 self,
-                "release",
+                lookup_entity_type,
                 mbid,
-                includes,
-                params=self._make_params(release_status, release_type),
-            )
-        )
-
-    def get_recording_by_id(
-        self, mbid, includes=[], release_status=[], release_type=[]
-    ):
-        return json.loads(
-            self._lookup(
-                self,
                 "recording",
-                mbid,
                 includes,
-                params=self._make_params(release_status, release_type),
-            )
-        )
-
-    def search_releases(self, query="", limit=None, offset=None, **fields):
-        return json.loads(
-            self._search(
-                self,
-                "release",
-                query=self._make_query(query, fields),
                 limit=limit,
                 offset=offset,
             )
         )
 
-    def search_recordings(self, query="", limit=None, offset=None, **fields):
+    def get_release_by_id(
+        self,
+        mbid: str,
+        includes: list[str] = [],
+    ) -> JSONDict:
+        """Get a release from its ID
+
+        :param mbid: The MusicBrainz ID of the release
+        :param includes: List of parameters to request more information to be included
+            about the release
+        :return: The JSON-decoded response as an object
+        """
+        return json.loads(
+            self._lookup(
+                self,
+                "release",
+                mbid,
+                includes,
+            )
+        )
+
+    def get_recording_by_id(
+        self,
+        mbid: str,
+        includes: list[str] = [],
+    ) -> JSONDict:
+        """Get a recording from its ID
+
+        :param mbid: The MusicBrainz ID of the entity
+        :param includes: List of parameters to request more information to be included
+            about the recording
+        :return: The JSON-decoded response as an object
+        """
+        return json.loads(
+            self._lookup(
+                self,
+                "recording",
+                mbid,
+                includes,
+            )
+        )
+
+    def search_releases(
+        self,
+        limit: int | None = None,
+        offset: int | None = None,
+        **fields: str,
+    ) -> JSONDict:
+        """Search for releases using a query
+
+        :param limit: The number of releases that should be returned
+        :param offset: Offset used for paging through more than one page of results
+        :param fields: Dict of fields composing the search query
+        :return: The JSON-decoded response as an object
+        """
+        return json.loads(
+            self._search(
+                self,
+                "release",
+                query=self._make_query(fields),
+                limit=limit,
+                offset=offset,
+            )
+        )
+
+    def search_recordings(
+        self,
+        limit: int | None = None,
+        offset: int | None = None,
+        **fields: str,
+    ) -> JSONDict:
+        """Search for recordings using a query
+
+        :param limit: The number of recordings that should be returned
+        :param offset: Offset used for paging through more than one page of results
+        :param fields: Dict of fields composing the search query
+        :return: The JSON-decoded response as an object
+        """
         return json.loads(
             self._search(
                 self,
                 "recording",
-                query=self._make_query(query, fields),
+                query=self._make_query(fields),
                 limit=limit,
                 offset=offset,
             )
