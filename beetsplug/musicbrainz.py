@@ -17,10 +17,10 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import traceback
-import re
 from collections import Counter
 from functools import cached_property
 from itertools import product
@@ -248,15 +248,13 @@ class MbInterface:
         query_parts = []
 
         if query:
-            clean_query = util._unicode(query)
             if fields:
-                clean_query = re.sub(lucene_special, r"\\\1", clean_query)
+                clean_query = re.sub(lucene_special, r"\\\1", query)
                 query_parts.append(clean_query.lower())
             else:
-                query_parts.append(clean_query)
+                query_parts.append(query)
         for key, value in fields.items():
             # Escape Lucene's special characters.
-            value = util._unicode(value)
             value = re.sub(lucene_special, r"\\\1", value)
             if value:
                 value = value.lower()  # avoid AND / OR
@@ -804,7 +802,8 @@ class MusicBrainzPlugin(BeetsPlugin):
                 self._log.debug("Retrieving tracks starting at {}", i)
                 recording_list.extend(
                     MbInterface().browse_recordings(
-                        release=release["id"],
+                        "release",
+                        release["id"],
                         limit=BROWSE_CHUNKSIZE,
                         includes=BROWSE_INCLUDES,
                         offset=i,
