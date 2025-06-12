@@ -835,8 +835,7 @@ class MBLibraryTest(MusicBrainzTestCase):
                 "country": "COUNTRY",
             },
         ]
-
-        with mock.patch("musicbrainzngs.get_release_by_id") as gp:
+        with mock.patch("musicbrainz.MbInterface.get_release_by_id") as gp:
             gp.side_effect = side_effect
             album = self.mb.album_for_id("d2a6f856-b553-40a0-ac54-a321e8e2da02")
             assert album.country == "COUNTRY"
@@ -879,7 +878,7 @@ class MBLibraryTest(MusicBrainzTestCase):
             },
         ]
 
-        with mock.patch("musicbrainzngs.get_release_by_id") as gp:
+        with mock.patch("musicbrainz.MbInterface.get_release_by_id") as gp:
             gp.side_effect = side_effect
             album = self.mb.album_for_id("d2a6f856-b553-40a0-ac54-a321e8e2da02")
             assert album.country is None
@@ -921,7 +920,7 @@ class MBLibraryTest(MusicBrainzTestCase):
             },
         ]
 
-        with mock.patch("musicbrainzngs.get_release_by_id") as gp:
+        with mock.patch("musicbrainz.MbInterface.get_release_by_id") as gp:
             gp.side_effect = side_effect
             album = self.mb.album_for_id("d2a6f856-b553-40a0-ac54-a321e8e2da02")
             assert album.country is None
@@ -970,7 +969,7 @@ class MBLibraryTest(MusicBrainzTestCase):
             },
         ]
 
-        with mock.patch("musicbrainzngs.get_release_by_id") as gp:
+        with mock.patch("musicbrainz.MbInterface.get_release_by_id") as gp:
             gp.side_effect = side_effect
             album = self.mb.album_for_id("d2a6f856-b553-40a0-ac54-a321e8e2da02")
             assert album.country is None
@@ -1021,7 +1020,7 @@ class TestMusicBrainzPlugin(PluginMixin):
 
     def test_item_candidates(self, monkeypatch, mb):
         monkeypatch.setattr(
-            "musicbrainzngs.search_recordings",
+            "musicbrainz.MbInterface.search_recordings",
             lambda *_, **__: {"recordings": [self.RECORDING]},
         )
 
@@ -1032,11 +1031,11 @@ class TestMusicBrainzPlugin(PluginMixin):
 
     def test_candidates(self, monkeypatch, mb):
         monkeypatch.setattr(
-            "musicbrainzngs.search_releases",
+            "musicbrainz.MbInterface.search_releases",
             lambda *_, **__: {"releases": [{"id": self.mbid}]},
         )
         monkeypatch.setattr(
-            "musicbrainzngs.get_release_by_id",
+            "musicbrainz.MbInterface.get_release_by_id",
             lambda *_, **__: {
                 "title": "hi",
                 "id": self.mbid,
