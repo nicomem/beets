@@ -27,6 +27,7 @@ from itertools import product
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
 
+import requests.exceptions  # For mbzero exception handling
 from mbzero import mbzerror
 from mbzero import mbzrequest as mbzr
 
@@ -162,16 +163,58 @@ class _RateLim(object):
 # Musicbrainz library interface
 
 
-class MbWebServiceError(mbzerror.MbzWebServiceError):
+class MbInterfaceError(Exception):
+    """Base class for exceptions raised by MbInterface"""
+
     pass
 
 
-class MusicBrainzError(mbzerror.MbzError):
+class MbInterfaceBadRequestError(MbInterfaceError):
+    """Exception raised when the request is ill-formed"""
+
     pass
 
 
-class MbResponseError(mbzerror.MbzWebServiceError):
+class MbInterfaceUnauthorizedError(MbInterfaceError):
+    """Exception raised when the request does not have valid and sufficient
+    authentication for accessing the resource"""
+
     pass
+
+
+class MbInterfaceNotFoundError(MbInterfaceError):
+    """Exception raised when an entity is not found"""
+
+    pass
+
+
+def _convert_mbzero_exception_to_local(
+    mbz_ex: mbzerror.MbzWebServiceError,
+) -> MbInterfaceError:
+    """Convert the mbzero exception to a MbInterfaceError
+
+    :param mbz_ex: The mbzero exception to convert
+    :return: The converted exception. Either the error could be converted into a
+    specific error, or an instance of the base class is returned.
+    """
+
+    # Upstream issue to have fine-grained exception handling:
+    # - https://gitlab.com/mbzero/python-mbzero/-/issues/2
+
+    # mbz_ex.message is not a str but the exception cause, while mbz_ex.cause is None...
+    if isinstance(mbz_ex.message, requests.exceptions.HTTPError):
+        http_error: requests.exceptions.HTTPError = mbz_ex.message
+        status_code = http_error.response.status_code
+
+        if status_code == 400:
+            return MbInterfaceBadRequestError(mbz_ex)
+        elif status_code == 401:
+            return MbInterfaceUnauthorizedError(mbz_ex)
+        elif status_code == 404:
+            return MbInterfaceNotFoundError(mbz_ex)
+
+    # Base exception if no specific one could be found
+    return MbInterfaceError(mbz_ex)
 
 
 class MbInterface:
@@ -204,6 +247,7 @@ class MbInterface:
         :param includes: List of parameters to request more information to be included
             about the entity
         :return: The response as bytes
+        :raises MbInterfaceError: if the request did not succeed
         """
         return self._send(
             mbzr.MbzRequestLookup(self.useragent, entity_type, mbid, includes),
@@ -230,6 +274,7 @@ class MbInterface:
         :param limit: The number of entities that should be returned
         :param offset: Offset used for paging through more than one page of results
         :return: The response as bytes
+        :raises MbInterfaceError: if the request did not succeed
         """
         return self._send(
             mbzr.MbzRequestBrowse(
@@ -260,6 +305,7 @@ class MbInterface:
         :param limit: The number of entities that should be returned
         :param offset: Offset used for paging through more than one page of results
         :return: The response as bytes
+        :raises MbInterfaceError: if the request did not succeed
         """
         return self._send(
             mbzr.MbzRequestSearch(self.useragent, entity_type, query),
@@ -281,6 +327,7 @@ class MbInterface:
         :param limit: The number of entities that should be returned
         :param offset: Offset used for paging through more than one page of results
         :return: The response as bytes
+        :raises MbInterfaceError: if the request did not succeed
         """
         if self.hostname:
             scheme = "https" if self.https else "http"
@@ -290,7 +337,10 @@ class MbInterface:
             opts["limit"] = limit
         if offset:
             opts["offset"] = offset
-        return mbr.send(opts=opts)
+        try:
+            return mbr.send(opts=opts)
+        except mbzerror.MbzWebServiceError as ex:
+            raise _convert_mbzero_exception_to_local(ex)
 
     def _make_query(self, fields: dict[str, str] = {}) -> str:
         """Make a Lucene Query string from a dict of fields
@@ -361,6 +411,7 @@ class MbInterface:
         :param limit: The number of recordings that should be returned
         :param offset: Offset used for paging through more than one page of results
         :return: The JSON-decoded response as an object
+        :raises MbInterfaceError: if the request did not succeed
         """
         return MbInterface._parse_and_clean_json(
             self._browse(
@@ -385,6 +436,7 @@ class MbInterface:
         :param includes: List of parameters to request more information to be included
             about the release
         :return: The JSON-decoded response as an object
+        :raises MbInterfaceError: if the request did not succeed
         """
         return MbInterface._parse_and_clean_json(
             self._lookup(
@@ -406,6 +458,7 @@ class MbInterface:
         :param includes: List of parameters to request more information to be included
             about the recording
         :return: The JSON-decoded response as an object
+        :raises MbInterfaceError: if the request did not succeed
         """
         return MbInterface._parse_and_clean_json(
             self._lookup(
@@ -428,6 +481,7 @@ class MbInterface:
         :param offset: Offset used for paging through more than one page of results
         :param fields: Dict of fields composing the search query
         :return: The JSON-decoded response as an object
+        :raises MbInterfaceError: if the request did not succeed
         """
         return MbInterface._parse_and_clean_json(
             self._search(
@@ -451,6 +505,7 @@ class MbInterface:
         :param offset: Offset used for paging through more than one page of results
         :param fields: Dict of fields composing the search query
         :return: The JSON-decoded response as an object
+        :raises MbInterfaceError: if the request did not succeed
         """
         return MbInterface._parse_and_clean_json(
             self._search(
@@ -470,8 +525,6 @@ class MusicBrainzAPIError(util.HumanReadableError):
 
     def __init__(self, reason, verb, query, tb=None):
         self.query = query
-        if isinstance(reason, MbWebServiceError):
-            reason = "MusicBrainz not reachable"
         super().__init__(reason, verb, tb)
 
     def get_message(self):
@@ -1215,7 +1268,7 @@ class MusicBrainzPlugin(BeetsPlugin):
         )
         try:
             res = method(limit=self.config["searchlimit"].get(int), **filters)
-        except MusicBrainzError as exc:
+        except MbInterfaceError as exc:
             raise MusicBrainzAPIError(
                 exc, f"{query_type} search", filters, traceback.format_exc()
             )
@@ -1266,10 +1319,10 @@ class MusicBrainzPlugin(BeetsPlugin):
                     self.mb_interface, res
                 )
 
-        except MbResponseError:
+        except MbInterfaceNotFoundError:
             self._log.debug("Album ID match failed.")
             return None
-        except MusicBrainzError as exc:
+        except MbInterfaceError as exc:
             raise MusicBrainzAPIError(
                 exc, "get release by ID", albumid, traceback.format_exc()
             )
@@ -1296,10 +1349,10 @@ class MusicBrainzPlugin(BeetsPlugin):
 
         try:
             res = self.mb_interface.get_recording_by_id(trackid, TRACK_INCLUDES)
-        except MbResponseError:
+        except MbInterfaceNotFoundError:
             self._log.debug("Track ID match failed.")
             return None
-        except MusicBrainzError as exc:
+        except MbInterfaceError as exc:
             raise MusicBrainzAPIError(
                 exc, "get recording by ID", trackid, traceback.format_exc()
             )
