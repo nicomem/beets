@@ -25,7 +25,7 @@ from collections import Counter
 from functools import cached_property
 from itertools import product
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 import requests.exceptions  # For mbzero exception handling
 from mbzero import mbzerror
@@ -307,8 +307,14 @@ class MbInterface:
         :return: The response as bytes
         :raises MbInterfaceError: if the request did not succeed
         """
+
+        # mbzero does not properly handle queries with special characters.
+        # Quote the query beforehand to avoid this problem.
+        # See: https://gitlab.com/mbzero/python-mbzero/-/issues/1
+        quoted_query = quote(query)
+
         return self._send(
-            mbzr.MbzRequestSearch(self.useragent, entity_type, query),
+            mbzr.MbzRequestSearch(self.useragent, entity_type, quoted_query),
             limit=limit,
             offset=offset,
         )
