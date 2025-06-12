@@ -446,7 +446,7 @@ def _multi_artist_credit(
 
             # An artist.
             if alias:
-                cur_artist_name = alias["alias"]
+                cur_artist_name = alias["name"]
             else:
                 cur_artist_name = el["artist"]["name"]
             artist_parts.append(cur_artist_name)
@@ -1071,8 +1071,13 @@ class MusicBrainzPlugin(BeetsPlugin):
         self._log.debug(
             "Searching for MusicBrainz {}s with: {!r}", query_type, filters
         )
+        mb_interface = MbInterface()
+        method = (
+            mb_interface.search_recordings
+            if query_type == "recording"
+            else mb_interface.search_releases
+        )
         try:
-            method = getattr(MbInterface(), f"search_{query_type}s")
             res = method(limit=self.config["searchlimit"].get(int), **filters)
         except MusicBrainzError as exc:
             raise MusicBrainzAPIError(
