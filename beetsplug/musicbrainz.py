@@ -573,6 +573,7 @@ def _is_translation(r):
 
 
 def _find_actual_release_from_pseudo_release(
+    mb_interface: MbInterface,
     pseudo_rel: JSONDict,
 ) -> JSONDict | None:
     try:
@@ -588,7 +589,7 @@ def _find_actual_release_from_pseudo_release(
 
     actual_id = translations[0]["target"]
 
-    return MbInterface().get_release_by_id(actual_id, includes=RELEASE_INCLUDES)
+    return mb_interface.get_release_by_id(actual_id, includes=RELEASE_INCLUDES)
 
 
 def _merge_pseudo_and_actual_album(
@@ -657,12 +658,13 @@ class MusicBrainzPlugin(BeetsPlugin):
                 "extra_tags": [],
             },
         )
+        self.mb_interface = MbInterface()
         hostname = self.config["host"].as_str()
         https = self.config["https"].get(bool)
         # Only call set_hostname when a custom server is configured. Since
         # musicbrainz-ngs connects to musicbrainz.org with HTTPS by default
         if hostname != "musicbrainz.org":
-            MbInterface().set_hostname(hostname, https)
+            self.mb_interface.set_hostname(hostname, https)
         _RateLimitsSingleton().set_rate_limit(
             self.config["ratelimit_interval"].as_number(),
             self.config["ratelimit"].get(int),
@@ -799,7 +801,7 @@ class MusicBrainzPlugin(BeetsPlugin):
             for i in range(0, ntracks, BROWSE_CHUNKSIZE):
                 self._log.debug("Retrieving tracks starting at {}", i)
                 recording_list.extend(
-                    MbInterface().browse_recordings(
+                    self.mb_interface.browse_recordings(
                         "release",
                         release["id"],
                         limit=BROWSE_CHUNKSIZE,
@@ -1071,11 +1073,10 @@ class MusicBrainzPlugin(BeetsPlugin):
         self._log.debug(
             "Searching for MusicBrainz {}s with: {!r}", query_type, filters
         )
-        mb_interface = MbInterface()
         method = (
-            mb_interface.search_recordings
+            self.mb_interface.search_recordings
             if query_type == "recording"
-            else mb_interface.search_releases
+            else self.mb_interface.search_releases
         )
         try:
             res = method(limit=self.config["searchlimit"].get(int), **filters)
@@ -1120,13 +1121,15 @@ class MusicBrainzPlugin(BeetsPlugin):
             return None
 
         try:
-            res = MbInterface().get_release_by_id(albumid, includes=RELEASE_INCLUDES)
+            res = self.mb_interface.get_release_by_id(albumid, includes=RELEASE_INCLUDES)
 
             # resolve linked release relations
             actual_res = None
 
             if res.get("status") == "Pseudo-Release":
-                actual_res = _find_actual_release_from_pseudo_release(res)
+                actual_res = _find_actual_release_from_pseudo_release(
+                    self.mb_interface, res
+                )
 
         except MbResponseError:
             self._log.debug("Album ID match failed.")
@@ -1157,7 +1160,7 @@ class MusicBrainzPlugin(BeetsPlugin):
             return None
 
         try:
-            res = MbInterface().get_recording_by_id(trackid, TRACK_INCLUDES)
+            res = self.mb_interface.get_recording_by_id(trackid, TRACK_INCLUDES)
         except MbResponseError:
             self._log.debug("Track ID match failed.")
             return None
