@@ -46,7 +46,8 @@ if TYPE_CHECKING:
 
 VARIOUS_ARTISTS_ID = "89ad4ac3-39f7-470e-963a-56509c546377"
 
-BASE_URL = "musicbrainz.org/ws/2"
+BASE_HOSTNAME = "musicbrainz.org"
+BASE_URL = f"https://{BASE_HOSTNAME}"
 
 SKIPPED_TRACKS = ["[data track]"]
 
@@ -177,7 +178,7 @@ class MbInterface:
     BEETS_USERAGENT = "beets/{} (https://beets.io/)".format(beets.__version__)
 
     def __init__(self, useragent=BEETS_USERAGENT):
-        self.hostname = BASE_URL
+        self.hostname = BASE_HOSTNAME
         self.https = True
         self.useragent = useragent
         pass
@@ -218,11 +219,8 @@ class MbInterface:
 
     def _send(self, mbr, limit=None, offset=None):
         if self.hostname:
-            mbr.set_url(
-                "{}://{}".format(
-                    "https" if self.https else "http", self.hostname
-                )
-            )
+            scheme = "https" if self.https else "http"
+            mbr.set_url(f"{scheme}://{self.hostname}/ws/2")
         opts = {}
         if limit:
             opts["limit"] = limit
