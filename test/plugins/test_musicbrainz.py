@@ -678,12 +678,12 @@ class ArtistFlatteningTest(unittest.TestCase):
 
     def _add_alias(self, credit_dict, suffix="", locale="", primary=False):
         alias = {
-            "alias": "ALIAS" + suffix,
+            "name": "ALIAS" + suffix,
             "locale": locale,
             "sort-name": "ALIASSORT" + suffix,
         }
         if primary:
-            alias["primary"] = "primary"
+            alias["primary"] = True
         if "aliases" not in credit_dict["artist"]:
             credit_dict["artist"]["aliases"] = []
         credit_dict["artist"]["aliases"].append(alias)
