@@ -835,7 +835,10 @@ class MBLibraryTest(MusicBrainzTestCase):
                 "country": "COUNTRY",
             },
         ]
-        with mock.patch("musicbrainz.MbInterface.get_release_by_id") as gp:
+
+        with mock.patch(
+            "beetsplug._mb_interface.MbInterface.get_release_by_id"
+        ) as gp:
             gp.side_effect = side_effect
             album = self.mb.album_for_id("d2a6f856-b553-40a0-ac54-a321e8e2da02")
             assert album.country == "COUNTRY"
@@ -878,7 +881,9 @@ class MBLibraryTest(MusicBrainzTestCase):
             },
         ]
 
-        with mock.patch("musicbrainz.MbInterface.get_release_by_id") as gp:
+        with mock.patch(
+            "beetsplug._mb_interface.MbInterface.get_release_by_id"
+        ) as gp:
             gp.side_effect = side_effect
             album = self.mb.album_for_id("d2a6f856-b553-40a0-ac54-a321e8e2da02")
             assert album.country is None
@@ -920,7 +925,9 @@ class MBLibraryTest(MusicBrainzTestCase):
             },
         ]
 
-        with mock.patch("musicbrainz.MbInterface.get_release_by_id") as gp:
+        with mock.patch(
+            "beetsplug._mb_interface.MbInterface.get_release_by_id"
+        ) as gp:
             gp.side_effect = side_effect
             album = self.mb.album_for_id("d2a6f856-b553-40a0-ac54-a321e8e2da02")
             assert album.country is None
@@ -969,7 +976,9 @@ class MBLibraryTest(MusicBrainzTestCase):
             },
         ]
 
-        with mock.patch("musicbrainz.MbInterface.get_release_by_id") as gp:
+        with mock.patch(
+            "beetsplug._mb_interface.MbInterface.get_release_by_id"
+        ) as gp:
             gp.side_effect = side_effect
             album = self.mb.album_for_id("d2a6f856-b553-40a0-ac54-a321e8e2da02")
             assert album.country is None
@@ -1020,7 +1029,7 @@ class TestMusicBrainzPlugin(PluginMixin):
 
     def test_item_candidates(self, monkeypatch, mb):
         monkeypatch.setattr(
-            "musicbrainz.MbInterface.search_recordings",
+            "beetsplug._mb_interface.MbInterface.search_recordings",
             lambda *_, **__: {"recordings": [self.RECORDING]},
         )
 
@@ -1031,11 +1040,11 @@ class TestMusicBrainzPlugin(PluginMixin):
 
     def test_candidates(self, monkeypatch, mb):
         monkeypatch.setattr(
-            "musicbrainz.MbInterface.search_releases",
+            "beetsplug._mb_interface.MbInterface.search_releases",
             lambda *_, **__: {"releases": [{"id": self.mbid}]},
         )
         monkeypatch.setattr(
-            "musicbrainz.MbInterface.get_release_by_id",
+            "beetsplug._mb_interface.MbInterface.get_release_by_id",
             lambda *_, **__: {
                 "title": "hi",
                 "id": self.mbid,
