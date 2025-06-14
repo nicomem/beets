@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import json
 import re
-import threading
-import time
 import traceback
 from collections import Counter
 from functools import cached_property
@@ -36,6 +34,7 @@ import beets.autotag.hooks
 from beets import config, plugins, util
 from beets.plugins import BeetsPlugin
 from beets.util.id_extractors import extract_release_id
+from beets.util.rate_limiter import RateLimiter
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -60,105 +59,6 @@ FIELDS_TO_MB_KEYS = {
     "media": "format",
     "year": "date",
 }
-
-
-# Rate limiting
-
-
-class _RateLimitsSingleton:
-    limit_interval = 1.0
-    limit_requests = 1
-    do_rate_limit = True
-
-    def __new__(cls):
-        """Makes that class a singleton"""
-        if not hasattr(cls, "instance"):
-            cls.instance = super(_RateLimitsSingleton, cls).__new__(cls)
-        return cls.instance
-
-    def get(self):
-        return (self.limit_interval, self.limit_requests, self.do_rate_limit)
-
-    def set_rate_limit(self, limit_or_interval=1.0, new_requests=1):
-        """Sets the rate limiting behavior of the module. Must be invoked
-        before the first Web service call.
-        If the `limit_or_interval` parameter is set to False then
-        rate limiting will be disabled. If it is a number then only
-        a set number of requests (`new_requests`) will be made per
-        given interval (`limit_or_interval`).
-        """
-        if isinstance(limit_or_interval, bool):
-            self.do_rate_limit = limit_or_interval
-        else:
-            if limit_or_interval <= 0.0:
-                raise ValueError("limit_or_interval can't be less than 0")
-            if new_requests <= 0:
-                raise ValueError("new_requests can't be less than 0")
-            self.do_rate_limit = True
-            self.limit_interval = limit_or_interval
-            self.limit_requests = new_requests
-
-
-class _RateLim(object):
-    """A decorator that limits the rate at which the function may be
-    called. The rate is controlled by the `limit_interval` and
-    `limit_requests` global variables. The limiting is thread-safe;
-    only one thread may be in the function at a time (acts like a
-    monitor in this sense). The globals must be set before the first
-    call to the limited function.
-    """
-
-    def __init__(self, fun):
-        self.fun = fun
-        self.last_call = 0.0
-        self.lock = threading.Lock()
-        self.remaining_requests = None  # Set on first invocation.
-
-    def _update_remaining(self):
-        """Update remaining requests based on the elapsed time since
-        they were last calculated.
-        """
-        (limit_interval, limit_requests, do_rate_limit) = (
-            _RateLimitsSingleton().get()
-        )
-
-        # On first invocation, we have the maximum number of requests
-        # available.
-        if self.remaining_requests is None:
-            self.remaining_requests = float(limit_requests)
-
-        else:
-            since_last_call = time.time() - self.last_call
-            self.remaining_requests += since_last_call * (
-                limit_requests / limit_interval
-            )
-            self.remaining_requests = min(
-                self.remaining_requests, float(limit_requests)
-            )
-
-        self.last_call = time.time()
-
-    def __call__(self, *args, **kwargs):
-        (limit_interval, limit_requests, do_rate_limit) = (
-            _RateLimitsSingleton().get()
-        )
-
-        with self.lock:
-            if do_rate_limit:
-                self._update_remaining()
-
-                # Delay if necessary.
-                while self.remaining_requests < 0.999:
-                    time.sleep(
-                        (1.0 - self.remaining_requests)
-                        * (limit_requests / limit_interval)
-                    )
-                    self._update_remaining()
-
-                # Call the original function, "paying" for this call.
-                self.remaining_requests -= 1.0
-            return self.fun(*args, **kwargs)
-
 
 # Musicbrainz library interface
 
@@ -222,17 +122,16 @@ class MbInterface:
 
     BEETS_USERAGENT = "beets/{} (https://beets.io/)".format(beets.__version__)
 
-    def __init__(self, useragent=BEETS_USERAGENT):
+    def __init__(self, rate_limiter: RateLimiter, useragent=BEETS_USERAGENT):
         self.hostname = BASE_HOSTNAME
         self.https = True
         self.useragent = useragent
-        pass
+        self.rate_limiter = rate_limiter
 
     def set_hostname(self, hostname: str, https: bool):
         self.hostname = hostname
         self.https = https
 
-    @_RateLim
     def _lookup(
         self,
         entity_type: str,
@@ -249,11 +148,13 @@ class MbInterface:
         :return: The response as bytes
         :raises MbInterfaceError: if the request did not succeed
         """
-        return self._send(
-            mbzr.MbzRequestLookup(self.useragent, entity_type, mbid, includes),
-        )
+        with self.rate_limiter:
+            return self._send(
+                mbzr.MbzRequestLookup(
+                    self.useragent, entity_type, mbid, includes
+                ),
+            )
 
-    @_RateLim
     def _browse(
         self,
         lookup_entity_type: str,
@@ -276,19 +177,19 @@ class MbInterface:
         :return: The response as bytes
         :raises MbInterfaceError: if the request did not succeed
         """
-        return self._send(
-            mbzr.MbzRequestBrowse(
-                self.useragent,
-                linked_entities_type,
-                lookup_entity_type,
-                mbid,
-                includes,
-            ),
-            limit=limit,
-            offset=offset,
-        )
+        with self.rate_limiter:
+            return self._send(
+                mbzr.MbzRequestBrowse(
+                    self.useragent,
+                    linked_entities_type,
+                    lookup_entity_type,
+                    mbid,
+                    includes,
+                ),
+                limit=limit,
+                offset=offset,
+            )
 
-    @_RateLim
     def _search(
         self,
         entity_type: str,
@@ -313,11 +214,14 @@ class MbInterface:
         # See: https://gitlab.com/mbzero/python-mbzero/-/issues/1
         quoted_query = quote(query)
 
-        return self._send(
-            mbzr.MbzRequestSearch(self.useragent, entity_type, quoted_query),
-            limit=limit,
-            offset=offset,
-        )
+        with self.rate_limiter:
+            return self._send(
+                mbzr.MbzRequestSearch(
+                    self.useragent, entity_type, quoted_query
+                ),
+                limit=limit,
+                offset=offset,
+            )
 
     def _send(
         self,
@@ -421,7 +325,6 @@ class MbInterface:
         """
         return MbInterface._parse_and_clean_json(
             self._browse(
-                self,
                 lookup_entity_type,
                 mbid,
                 "recording",
@@ -446,7 +349,6 @@ class MbInterface:
         """
         return MbInterface._parse_and_clean_json(
             self._lookup(
-                self,
                 "release",
                 mbid,
                 includes,
@@ -468,7 +370,6 @@ class MbInterface:
         """
         return MbInterface._parse_and_clean_json(
             self._lookup(
-                self,
                 "recording",
                 mbid,
                 includes,
@@ -491,7 +392,6 @@ class MbInterface:
         """
         return MbInterface._parse_and_clean_json(
             self._search(
-                self,
                 "release",
                 query=self._make_query(fields),
                 limit=limit,
@@ -515,7 +415,6 @@ class MbInterface:
         """
         return MbInterface._parse_and_clean_json(
             self._search(
-                self,
                 "recording",
                 query=self._make_query(fields),
                 limit=limit,
@@ -852,17 +751,18 @@ class MusicBrainzPlugin(BeetsPlugin):
                 "extra_tags": [],
             },
         )
-        self.mb_interface = MbInterface()
+        self.mb_interface = MbInterface(
+            RateLimiter(
+                reqs_per_interval=self.config["ratelimit"].get(int),
+                interval_sec=self.config["ratelimit_interval"].as_number(),
+            )
+        )
         hostname = self.config["host"].as_str()
         https = self.config["https"].get(bool)
         # Only call set_hostname when a custom server is configured. Since
         # musicbrainz-ngs connects to musicbrainz.org with HTTPS by default
         if hostname != "musicbrainz.org":
             self.mb_interface.set_hostname(hostname, https)
-        _RateLimitsSingleton().set_rate_limit(
-            self.config["ratelimit_interval"].as_number(),
-            self.config["ratelimit"].get(int),
-        )
 
     def track_info(
         self,
