@@ -18,14 +18,15 @@
 from collections import defaultdict
 from collections.abc import Iterator
 
-import musicbrainzngs
-from musicbrainzngs.musicbrainz import MusicBrainzError
+from mbzero import mbzerror
 
 from beets import config, plugins
 from beets.dbcore import types
 from beets.library import Album, Item, Library
 from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand, decargs, print_
+
+from ._mb_interface import SharedMbInterface
 
 MB_ARTIST_QUERY = r"mb_albumartistid::^\w{8}-\w{4}-\w{4}-\w{4}-\w{12}$"
 
@@ -102,6 +103,8 @@ class MissingPlugin(BeetsPlugin):
                 "album": False,
             }
         )
+
+        self.mb_interface = SharedMbInterface().get()
 
         self.album_template_fields["missing"] = _missing_count
 
@@ -189,8 +192,8 @@ class MissingPlugin(BeetsPlugin):
         calculating_total = self.config["total"].get()
         for (artist, artist_id), album_ids in album_ids_by_artist.items():
             try:
-                resp = musicbrainzngs.browse_release_groups(artist=artist_id)
-            except MusicBrainzError as err:
+                resp = self.mb_interface.browse_release_groups(artist_id)
+            except mbzerror.MbzWebServiceError as err:
                 self._log.info(
                     "Couldn't fetch info for artist '{}' ({}) - '{}'",
                     artist,
