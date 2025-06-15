@@ -17,9 +17,15 @@ import re
 
 import musicbrainzngs
 
-from beets import config, ui
+from beets import ui
 from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand
+
+from ._mb_interface import (
+    MbInterfaceError,
+    MbInterfaceUnauthorizedError,
+    SharedMbInterface,
+)
 
 SUBMISSION_CHUNK_SIZE = 200
 FETCH_CHUNK_SIZE = 100
@@ -30,12 +36,10 @@ def mb_call(func, *args, **kwargs):
     """Call a MusicBrainz API function and catch exceptions."""
     try:
         return func(*args, **kwargs)
-    except musicbrainzngs.AuthenticationError:
+    except MbInterfaceUnauthorizedError:
         raise ui.UserError("authentication with MusicBrainz failed")
-    except (musicbrainzngs.ResponseError, musicbrainzngs.NetworkError) as exc:
+    except MbInterfaceError as exc:
         raise ui.UserError(f"MusicBrainz API error: {exc}")
-    except musicbrainzngs.UsageError:
-        raise ui.UserError("MusicBrainz credentials missing")
 
 
 def submit_albums(collection_id, release_ids):
@@ -44,17 +48,14 @@ def submit_albums(collection_id, release_ids):
     """
     for i in range(0, len(release_ids), SUBMISSION_CHUNK_SIZE):
         chunk = release_ids[i : i + SUBMISSION_CHUNK_SIZE]
+        # TODO: mbzero does not support PUT requests...
+        # - https://gitlab.com/mbzero/python-mbzero/-/issues/3
         mb_call(musicbrainzngs.add_releases_to_collection, collection_id, chunk)
 
 
 class MusicBrainzCollectionPlugin(BeetsPlugin):
     def __init__(self):
         super().__init__()
-        config["musicbrainz"]["pass"].redact = True
-        musicbrainzngs.auth(
-            config["musicbrainz"]["user"].as_str(),
-            config["musicbrainz"]["pass"].as_str(),
-        )
         self.config.add(
             {
                 "auto": False,
@@ -62,11 +63,14 @@ class MusicBrainzCollectionPlugin(BeetsPlugin):
                 "remove": False,
             }
         )
+        self.mb_interface = (
+            SharedMbInterface().require_auth_for_plugin(self.name).get()
+        )
         if self.config["auto"]:
             self.import_stages = [self.imported]
 
     def _get_collection(self):
-        collections = mb_call(musicbrainzngs.get_collections)
+        collections = mb_call(self.mb_interface.get_user_collections)
         if not collections["collection-list"]:
             raise ui.UserError("no collections exist for user")
 
@@ -90,7 +94,8 @@ class MusicBrainzCollectionPlugin(BeetsPlugin):
     def _get_albums_in_collection(self, id):
         def _fetch(offset):
             res = mb_call(
-                musicbrainzngs.get_releases_in_collection,
+                self.mb_interface.browse_release,
+                "collection",
                 id,
                 limit=FETCH_CHUNK_SIZE,
                 offset=offset,
@@ -124,6 +129,8 @@ class MusicBrainzCollectionPlugin(BeetsPlugin):
         remove_me = list(set(albums_in_collection) - lib_ids)
         for i in range(0, len(remove_me), FETCH_CHUNK_SIZE):
             chunk = remove_me[i : i + FETCH_CHUNK_SIZE]
+            # TODO: mbzero does not support DELETE requests...
+            # - https://gitlab.com/mbzero/python-mbzero/-/issues/3
             mb_call(
                 musicbrainzngs.remove_releases_from_collection,
                 collection_id,
