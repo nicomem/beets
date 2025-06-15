@@ -16,17 +16,19 @@
 and work composition date
 """
 
-import musicbrainzngs
+from mbzero import mbzerror
 
 from beets import ui
 from beets.plugins import BeetsPlugin
 
+from ._mb_interface import MbInterface, SharedMbInterface
 
-def direct_parent_id(mb_workid, work_date=None):
+
+def direct_parent_id(mb_interface: MbInterface, mb_workid: str, work_date=None):
     """Given a Musicbrainz work id, find the id one of the works the work is
     part of and the first composition date it encounters.
     """
-    work_info = musicbrainzngs.get_work_by_id(
+    work_info = mb_interface.get_work_by_id(
         mb_workid, includes=["work-rels", "artist-rels"]
     )
     if "artist-relation-list" in work_info["work"] and work_date is None:
@@ -46,25 +48,25 @@ def direct_parent_id(mb_workid, work_date=None):
     return None, work_date
 
 
-def work_parent_id(mb_workid):
+def work_parent_id(mb_interface: MbInterface, mb_workid: str):
     """Find the parent work id and composition date of a work given its id."""
     work_date = None
     while True:
-        new_mb_workid, work_date = direct_parent_id(mb_workid, work_date)
+        new_mb_workid, work_date = direct_parent_id(
+            mb_interface, mb_workid, work_date
+        )
         if not new_mb_workid:
             return mb_workid, work_date
         mb_workid = new_mb_workid
     return mb_workid, work_date
 
 
-def find_parentwork_info(mb_workid):
+def find_parentwork_info(mb_interface: MbInterface, mb_workid):
     """Get the MusicBrainz information dict about a parent work, including
     the artist relations, and the composition date for a work's parent work.
     """
-    parent_id, work_date = work_parent_id(mb_workid)
-    work_info = musicbrainzngs.get_work_by_id(
-        parent_id, includes=["artist-rels"]
-    )
+    parent_id, work_date = work_parent_id(mb_interface, mb_workid)
+    work_info = mb_interface.get_work_by_id(parent_id, includes=["artist-rels"])
     return work_info, work_date
 
 
@@ -78,6 +80,8 @@ class ParentWorkPlugin(BeetsPlugin):
                 "force": False,
             }
         )
+
+        self.mb_interface = SharedMbInterface().get()
 
         if self.config["auto"]:
             self.import_stages = [self.imported]
@@ -192,8 +196,10 @@ add one at https://musicbrainz.org/recording/{}",
             work_changed = item.parentwork_workid_current != item.mb_workid
         if force or not hasparent or work_changed:
             try:
-                work_info, work_date = find_parentwork_info(item.mb_workid)
-            except musicbrainzngs.musicbrainz.WebServiceError as e:
+                work_info, work_date = find_parentwork_info(
+                    self.mb_interface, item.mb_workid
+                )
+            except mbzerror.MbzWebServiceError as e:
                 self._log.debug("error fetching work: {}", e)
                 return
             parent_info = self.get_info(item, work_info)

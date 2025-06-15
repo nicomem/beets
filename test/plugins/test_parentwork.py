@@ -160,7 +160,8 @@ class ParentWorkTest(PluginTestCase):
         """Set up configuration"""
         super().setUp()
         self.patcher = patch(
-            "musicbrainzngs.get_work_by_id", side_effect=mock_workid_response
+            "beetsplug._mb_interface.MbInterface.get_work_by_id",
+            side_effect=mock_workid_response,
         )
         self.patcher.start()
 

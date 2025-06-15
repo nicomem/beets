@@ -354,6 +354,27 @@ class MbInterface:
             )
         )
 
+    def get_work_by_id(
+        self,
+        mbid: str,
+        includes: list[str] = [],
+    ) -> "JSONDict":
+        """Get a work from its ID
+
+        :param mbid: The MusicBrainz ID of the entity
+        :param includes: List of parameters to request more information to be included
+            about the work
+        :return: The JSON-decoded response as an object
+        :raises mbzerror.MbzRequestError: if the request did not succeed
+        """
+        return MbInterface._parse_and_clean_json(
+            self._lookup(
+                "work",
+                mbid,
+                includes,
+            )
+        )
+
     def search_releases(
         self,
         limit: int | None = None,
