@@ -2,12 +2,13 @@
 
 import datetime
 
-import musicbrainzngs
 import requests
 
 from beets import config, ui
 from beets.plugins import BeetsPlugin
 from beetsplug.lastimport import process_tracks
+
+from ._mb_interface import SharedMbInterface
 
 
 class ListenBrainzPlugin(BeetsPlugin):
@@ -22,6 +23,7 @@ class ListenBrainzPlugin(BeetsPlugin):
         self.token = self.config["token"].get()
         self.username = self.config["username"].get()
         self.AUTH_HEADER = {"Authorization": f"Token {self.token}"}
+        self.mb_interface = SharedMbInterface().get()
         config["listenbrainz"]["token"].redact = True
 
     def commands(self):
@@ -132,10 +134,9 @@ class ListenBrainzPlugin(BeetsPlugin):
 
     def get_mb_recording_id(self, track):
         """Returns the MusicBrainz recording ID for a track."""
-        resp = musicbrainzngs.search_recordings(
-            query=track["track_metadata"].get("track_name"),
+        resp = self.mb_interface.search_recordings(
+            recording=track["track_metadata"].get("track_name"),
             release=track["track_metadata"].get("release_name"),
-            strict=True,
         )
         if resp.get("recording-count") == "1":
             return resp.get("recording-list")[0].get("id")
@@ -210,7 +211,7 @@ class ListenBrainzPlugin(BeetsPlugin):
         track_info = []
         for track in tracks:
             identifier = track.get("identifier")
-            resp = musicbrainzngs.get_recording_by_id(
+            resp = self.mb_interface.get_recording_by_id(
                 identifier, includes=["releases", "artist-credits"]
             )
             recording = resp.get("recording")
