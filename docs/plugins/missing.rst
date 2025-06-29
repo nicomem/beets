@@ -55,6 +55,9 @@ Here's an example ::
         count: no
         total: no
 
+Other ``musicbrainz`` options may be set to modify the connection to MusicBrainz
+(see :ref:`musicbrainz-shared-options`).
+
 Template Fields
 ---------------
 
