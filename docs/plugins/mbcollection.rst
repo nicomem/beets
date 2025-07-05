@@ -33,7 +33,7 @@ Configuration
 -------------
 
 To configure the plugin, make a ``mbcollection:`` section in your
-configuration file. There is one option available:
+configuration file. The following options are available:
 
 - **auto**: Automatically amend your MusicBrainz collection whenever you
   import a new album.
