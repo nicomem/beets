@@ -15,6 +15,9 @@ Then, add your MusicBrainz username and password to your
         user: you
         pass: seekrit
 
+Other ``musicbrainz`` options may be set to modify the connection to MusicBrainz
+(see :ref:`musicbrainz-shared-options`).
+
 Then, use the ``beet mbupdate`` command to send your albums to MusicBrainz. The
 command automatically adds all of your albums to the first collection it finds.
 If you don't have a MusicBrainz collection yet, you may need to add one to your
@@ -30,7 +33,7 @@ Configuration
 -------------
 
 To configure the plugin, make a ``mbcollection:`` section in your
-configuration file. There is one option available:
+configuration file. The following options are available:
 
 - **auto**: Automatically amend your MusicBrainz collection whenever you
   import a new album.
